@@ -23,6 +23,10 @@ class ConvolutionDepthWise_arm : public ConvolutionDepthWise
 {
 public:
     virtual int forward(const Mat& bottom_blobs, Mat& top_blobs) const;
+#if NCNN_CNNCACHE
+    virtual bool needs_cache() const {return true;}
+    virtual int forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const;
+#endif
 };
 
 } // namespace ncnn

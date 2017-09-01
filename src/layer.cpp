@@ -84,6 +84,33 @@ int Layer::forward_inplace(Mat& bottom_top_blob) const
     return ret;
 }
 
+#if NCNN_CNNCACHE
+int Layer::forward_mrect(std::vector<MRect>& bottom_mrects, std::vector<MRect>& top_mrects) const
+{
+    MRect bottom_mrect;
+    for (MRect m: bottom_mrects) {
+        if (m.size() > 0) {
+            bottom_mrect = m;
+            break;
+        }
+    }
+    for (MRect& mrect: top_mrects) {
+        mrect.copyFrom(bottom_mrect);
+    }
+    return 0;
+}
+int Layer::forward_mrect(MRect& bottom_mrect, MRect& top_mrect) const
+{
+    top_mrect.copyFrom(bottom_mrect);
+    return 0;
+}
+int Layer::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const
+{
+    // LOGI("forward_cached\n");
+    return forward(bottom_blob, top_blob);
+}
+#endif
+
 #include "layer_declaration.h"
 
 static const layer_registry_entry layer_registry[] =

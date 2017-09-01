@@ -30,6 +30,13 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob) const
     // convolv with NxN kernel
     // value = value + bias
 
+#if NCNN_CNNCACHE
+    struct timeval tv_begin, tv_end;
+    gettimeofday(&tv_begin, NULL);
+#endif
+
+    return Convolution::forward(bottom_blob, top_blob);
+
     if (kernel_size > 7 || stride > 4 || dilation != 1)
     {
         return Convolution::forward(bottom_blob, top_blob);
@@ -94,6 +101,11 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob) const
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
 
+#if NCNN_CNNCACHE
+    LOGI("Convolution::forward input %dx%dx%d  pad =%d  ksize=%d output=%d stride=%d\n",
+        w, h, channels, pad, kernel_size, num_output, stride);
+#endif
+
     Mat bottom_blob_bordered = bottom_blob;
     if (pad > 0)
     {
@@ -128,7 +140,21 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob) const
 
     conv(bottom_blob_bordered, top_blob, weight_data, bias_data);
 
+#if NCNN_CNNCACHE
+    gettimeofday(&tv_end, NULL);
+    int elapsed = ((tv_end.tv_sec - tv_begin.tv_sec) * 1000000.0f + tv_end.tv_usec - tv_begin.tv_usec) / 1000.0f;
+    LOGI("conv_arm elapsed: %d", elapsed);
+#endif
+
     return 0;
 }
+
+#if NCNN_CNNCACHE
+int Convolution_arm::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const
+{
+    // LOGI("Convolution_arm::forward_cached\n");
+    return Convolution::forward_cached(bottom_blob, top_blob, mrect, cached_blob);
+}
+#endif
 
 } // namespace ncnn

@@ -34,6 +34,10 @@ public:
 
     virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
 
+#if NCNN_CNNCACHE
+    virtual int forward_mrect(MRect& bottom_mrect, MRect& top_mrect) const;
+#endif
+    
     enum { PoolMethod_MAX = 0, PoolMethod_AVE = 1 };
 
 public:

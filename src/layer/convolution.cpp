@@ -253,6 +253,9 @@ int Convolution::load_model(const unsigned char*& mem)
 
 int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
 {
+    struct timeval t1, t2;
+    gettimeofday(&t1, NULL);
+
     // convolv with NxN kernel
     // value = value + bias
 
@@ -291,6 +294,11 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
 
     int outw = (w - kernel_extent) / stride + 1;
     int outh = (h - kernel_extent) / stride + 1;
+
+#if NCNN_CNNCACHE    
+    LOGI("Convolution::forward input=%dx%dx%d output=%dx%dx%d pad=%d ksize=%d stride=%d dilation=%d\n",
+        w, h, channels, outw, outh, num_output, pad, kernel_size, stride, dilation);
+#endif
 
     top_blob.create(outw, outh, num_output);
     if (top_blob.empty())
@@ -358,7 +366,180 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
         }
     }
 
+    gettimeofday(&t2, NULL);
+
+    float elapsed_1 = ((t2.tv_sec - t1.tv_sec) * 1000000.0f + t2.tv_usec - t1.tv_usec) / 1000.0f;
+    LOGI("Convolution::forward elapsed: %f\n", elapsed_1);
+
     return 0;
 }
+
+#if NCNN_CNNCACHE
+int Convolution::forward_mrect(MRect& bottom_mrect, MRect& top_mrect) const
+{
+    // LOGI("Convolution::forward_mrect info: %s\n", bottom_mrect.info().c_str());
+    top_mrect.forward_in_conv_or_pool(bottom_mrect, pad, kernel_size, stride);
+    return 0;
+}
+
+int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const
+{
+    // convolv with NxN kernel
+    // value = value + bias
+
+    if (cached_blob.empty()) {
+        // LOGI("cached_blob size: %dx%dx%d %d %p\n",
+        //     cached_blob.w, cached_blob.h, cached_blob.c, cached_blob.cstep, cached_blob.data);
+        return Convolution::forward(bottom_blob, top_blob);
+    }
+
+    struct timeval t1, t2;
+    gettimeofday(&t1, NULL);
+
+    // Step 1: copy the cahced blocks
+    // Step 2: make a bitmap specifying which can be reused
+    // Step 3: re-calculate other blocks
+
+    int w = bottom_blob.w;
+    int h = bottom_blob.h;
+    int channels = bottom_blob.c;
+
+    LOGI("Convolution::forward_cached input %dx%dx%d  pad =%d  ksize=%d output:%d stride=%d\n",
+        w, h, channels, pad, kernel_size, num_output, stride);
+    LOGI("mrect info: %s\n", mrect.info().c_str());
+
+    const int kernel_extent = dilation * (kernel_size - 1) + 1;
+
+    Mat bottom_blob_bordered = bottom_blob;
+    if (pad > 0)
+    {
+        copy_make_border(bottom_blob, bottom_blob_bordered, pad, pad, pad, pad, BORDER_CONSTANT, 0.f);
+        if (bottom_blob_bordered.empty())
+            return -100;
+
+        w = bottom_blob_bordered.w;
+        h = bottom_blob_bordered.h;
+    }
+    else if (pad == -233)
+    {
+        int wpad = kernel_extent + (w - 1) / stride * stride - w;
+        int hpad = kernel_extent + (h - 1) / stride * stride - h;
+        if (wpad > 0 || hpad > 0)
+        {
+            copy_make_border(bottom_blob, bottom_blob_bordered, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, BORDER_CONSTANT, 0.f);
+            if (bottom_blob_bordered.empty())
+                return -100;
+        }
+
+        w = bottom_blob_bordered.w;
+        h = bottom_blob_bordered.h;
+    }
+
+    int outw = (w - kernel_extent) / stride + 1;
+    int outh = (h - kernel_extent) / stride + 1;
+
+    top_blob.create(outw, outh, num_output);
+    if (top_blob.empty())
+        return -100;
+
+    const int maxk = kernel_size * kernel_size;
+
+    // kernel offsets
+    std::vector<int> _space_ofs(maxk);
+    int* space_ofs = &_space_ofs[0];
+    {
+        int p1 = 0;
+        int p2 = 0;
+        int gap = w * dilation - kernel_size * dilation;
+        for (int i = 0; i < kernel_size; i++)
+        {
+            for (int j = 0; j < kernel_size; j++)
+            {
+                space_ofs[p1] = p2;
+                p1++;
+                p2 += dilation;
+            }
+            p2 += gap;
+        }
+    }
+
+    // Step 1 & Step 2
+    // TODO: make it run on multiple threads
+    int* cached_map = (int*) calloc(outh * outw, sizeof(int));
+    for (size_t i = 0, max = mrect.size(); i < max; i ++) {
+        struct rect pre = mrect.pre[i];
+        struct rect cur = mrect.cur[i];
+        // #pragma omp parallel for
+        for (int j = 0; j < num_output; j ++) {
+            float* pre_ptr = cached_blob.channel(j).row(pre.y1) + pre.x1;
+            float* cur_ptr = top_blob.channel(j).row(cur.y1) + cur.x1;
+            int offset = (pre.x2 - pre.x1 + 1) * sizeof(float);
+            for (int k = cur.y1; k <= cur.y2; k ++) {
+                // Step 2: build cache map
+                cached_map[k * outw + cur.x1] = pre.x2 - pre.x1 + 1;
+                // Step 1: copy cached block
+                memcpy(cur_ptr, pre_ptr, offset);
+                pre_ptr += top_blob.w;
+                cur_ptr += top_blob.w;
+            }
+        }
+    }
+
+    // num_output
+    const float* weight_data_ptr = weight_data;
+    #pragma omp parallel for
+    for (int p=0; p<num_output; p++)
+    {
+        float* outptr = top_blob.channel(p);
+
+        for (int i = 0; i < outh; i++)
+        {
+            for (int j = 0; j < outw; j++)
+            {
+                // Reuse the block
+                int temp = cached_map[i * outw + j];
+                if (temp > 0) {
+                    j += temp;
+                }
+
+                float sum = 0.f;
+
+                if (bias_term)
+                    sum = bias_data.data[p];
+
+                const float* kptr = weight_data_ptr + maxk * channels * p;
+
+                // channels
+                for (int q=0; q<channels; q++)
+                {
+                    const Mat m = bottom_blob_bordered.channel(q);
+                    const float* sptr = m.data + m.w * i*stride + j*stride;
+
+                    for (int k = 0; k < maxk; k++) // 29.23
+                    {
+                        float val = sptr[ space_ofs[k] ]; // 20.72
+                        float w = kptr[k];
+                        sum += val * w; // 41.45
+                    }
+
+                    kptr += maxk;
+                }
+
+                outptr[j] = sum;
+            }
+
+            outptr += outw;
+        }
+    }
+
+    gettimeofday(&t2, NULL);
+
+    float elapsed_1 = ((t2.tv_sec - t1.tv_sec) * 1000000.0f + t2.tv_usec - t1.tv_usec) / 1000.0f;
+    LOGI("Convolution::forward_cached elapsed: %f\n", elapsed_1);
+
+    return 0;
+}
+
+#endif
 
 } // namespace ncnn

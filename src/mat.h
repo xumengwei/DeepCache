@@ -48,6 +48,8 @@ public:
     void fill(float v);
     // deep copy
     Mat clone() const;
+    // deep copy
+    int cloneFrom(Mat target);
     // reshape vec
     Mat reshape(int w) const;
     // reshape image
@@ -335,6 +337,26 @@ inline Mat Mat::clone() const
     }
 
     return m;
+}
+
+inline int Mat::cloneFrom(const Mat target)
+{
+    size_t totalsize = target.total() * sizeof(float);
+    data = (float*)fastMalloc(totalsize + (int)sizeof(*refcount));
+    
+    dims = target.dims;
+    w = target.w;
+    h = target.h;
+    c = target.c;
+    cstep = target.cstep;
+    refcount = NULL;
+
+    if (target.total() > 0)
+    {
+        memcpy(data, target.data, target.total() * sizeof(float));
+    }
+
+    return 0;
 }
 
 inline Mat Mat::reshape(int _w) const

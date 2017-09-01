@@ -13,6 +13,7 @@
 // specific language governing permissions and limitations under the License.
 
 #include "net.h"
+// #include <android/log.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -125,7 +126,8 @@ int Net::load_param(FILE* fp)
 
         layer->type = std::string(layer_type);
         layer->name = std::string(layer_name);
-//         fprintf(stderr, "new layer %d %s\n", layer_index, layer_name);
+        // fprintf(stderr, "new layer %d %s\n", layer_index, layer_name);
+        // LOGI("new layer %d %s\n", layer_index, layer_name);
 
         layer->bottoms.resize(bottom_count);
         for (int i=0; i<bottom_count; i++)
@@ -200,6 +202,9 @@ int Net::load_param(const char* protopath)
     FILE* fp = fopen(protopath, "rb");
     if (!fp)
     {
+#if NCNN_CNNCACHE
+        LOGE("Fail to load fopen param file: %s\n", protopath);
+#endif
         fprintf(stderr, "fopen %s failed\n", protopath);
         return -1;
     }
@@ -293,6 +298,9 @@ int Net::load_param_bin(const char* protopath)
     FILE* fp = fopen(protopath, "rb");
     if (!fp)
     {
+#if NCNN_CNNCACHE
+        LOGE("Fail to load fopen param_bin file: %s\n", protopath);
+#endif
         fprintf(stderr, "fopen %s failed\n", protopath);
         return -1;
     }
@@ -381,7 +389,9 @@ int Net::load_param(const unsigned char* _mem)
 
 //         layer->type = std::string(layer_type);
 //         layer->name = std::string(layer_name);
-//         fprintf(stderr, "new layer %d\n", typeindex);
+#if NCNN_CNNCACHE
+        LOGI("new layer %d\n", typeindex);
+#endif
 
         layer->bottoms.resize(bottom_count);
         for (int j=0; j<bottom_count; j++)
@@ -526,11 +536,18 @@ Layer* Net::create_custom_layer(int index)
     return layer_creator();
 }
 
-int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightmode) const
+int Net::forward_layer(int layer_index, Extractor* extractor) const
 {
+    bool lightmode = extractor->lightmode;
+    std::vector<Mat>& blob_mats = extractor->blob_mats;
     const Layer* layer = layers[layer_index];
+    int ret;
 
-//     fprintf(stderr, "forward_layer %d %s\n", layer_index, layer->name.c_str());
+#if NCNN_CNNCACHE
+    // LOGI("Net::forward_layer index: %d name: %s type: %s\n",
+    //     layer_index, layer->name.c_str(), layer->type.c_str());
+#endif
+    // fprintf(stderr, "forward_layer %d %s\n", layer_index, layer->name.c_str());
 
     if (layer->one_blob_only)
     {
@@ -540,10 +557,13 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
 
         if (blob_mats[bottom_blob_index].dims == 0)
         {
-            int ret = forward_layer(blobs[bottom_blob_index].producer, blob_mats, lightmode);
+            ret = forward_layer(blobs[bottom_blob_index].producer, extractor);
             if (ret != 0)
                 return ret;
         }
+
+        // LOGI("Net::forward_layer index: %d name: %s type: %s\n",
+        //     layer_index, layer->name.c_str(), layer->type.c_str());
 
         Mat bottom_blob = blob_mats[bottom_blob_index];
 
@@ -558,11 +578,19 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
             }
         }
 
+#if NCNN_CNNCACHE
+        ret = layer->forward_mrect(
+            extractor->matched_rects[bottom_blob_index],
+            extractor->matched_rects[top_blob_index]);
+        if (ret != 0)
+            LOGE("Failing forward_mrect: %d", ret);
+#endif
+
         // forward
         if (lightmode && layer->support_inplace)
         {
             Mat& bottom_top_blob = bottom_blob;
-            int ret = layer->forward_inplace(bottom_top_blob);
+            ret = layer->forward_inplace(bottom_top_blob);
             if (ret != 0)
                 return ret;
 
@@ -572,7 +600,20 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
         else
         {
             Mat top_blob;
-            int ret = layer->forward(bottom_blob, top_blob);
+#if NCNN_CNNCACHE
+            // TODO: we should add this every place forward func is called but
+            // conv is one_blob_only and has no light impl it's enough we impl here
+            if (extractor->cache_mode) {
+                ret = layer->forward_cached(bottom_blob, top_blob,
+                    extractor->matched_rects[top_blob_index],
+                    extractor->blob_mats_cached[layer_index]);
+            }
+            else {
+                ret = layer->forward(bottom_blob, top_blob);
+            }
+#else
+            ret = layer->forward(bottom_blob, top_blob);
+#endif
             if (ret != 0)
                 return ret;
 
@@ -586,19 +627,26 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
         // load bottom blobs
         std::vector<Mat> bottom_blobs;
         bottom_blobs.resize(layer->bottoms.size());
+#if NCNN_CNNCACHE
+        std::vector<MRect> bottom_mrects;
+        bottom_mrects.resize(layer->bottoms.size());
+#endif
         for (size_t i=0; i<layer->bottoms.size(); i++)
         {
             int bottom_blob_index = layer->bottoms[i];
 
             if (blob_mats[bottom_blob_index].dims == 0)
             {
-                int ret = forward_layer(blobs[bottom_blob_index].producer, blob_mats, lightmode);
+                ret = forward_layer(blobs[bottom_blob_index].producer, extractor);
                 if (ret != 0)
                     return ret;
             }
 
             bottom_blobs[i] = blob_mats[bottom_blob_index];
 
+#if NCNN_CNNCACHE
+            bottom_mrects[i] = extractor->matched_rects[bottom_blob_index];
+#endif
             if (lightmode)
             {
                 // delete after taken in light mode
@@ -611,11 +659,24 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
             }
         }
 
+#if NCNN_CNNCACHE
+        std::vector<MRect> top_mrects;
+        top_mrects.resize(layer->tops.size());
+        ret = layer->forward_mrect(bottom_mrects, top_mrects);
+        if (ret != 0)
+            LOGE("Failing forward_mrect: %d", ret);
+        for (size_t i=0; i<layer->tops.size(); i++)
+        {
+            int top_blob_index = layer->tops[i];
+            extractor->matched_rects[top_blob_index].copyFrom(top_mrects[i]);
+        }
+#endif
+
         // forward
         if (lightmode && layer->support_inplace)
         {
             std::vector<Mat>& bottom_top_blobs = bottom_blobs;
-            int ret = layer->forward_inplace(bottom_top_blobs);
+            ret = layer->forward_inplace(bottom_top_blobs);
             if (ret != 0)
                 return ret;
 
@@ -631,7 +692,7 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightm
         {
             std::vector<Mat> top_blobs;
             top_blobs.resize(layer->tops.size());
-            int ret = layer->forward(bottom_blobs, top_blobs);
+            ret = layer->forward(bottom_blobs, top_blobs);
             if (ret != 0)
                 return ret;
 
@@ -657,6 +718,11 @@ Extractor::Extractor(const Net* _net, int blob_count) : net(_net)
     blob_mats.resize(blob_count);
     lightmode = false;
     num_threads = 0;
+#if NCNN_CNNCACHE
+    blob_mats_cached.resize(net->layers.size());
+    matched_rects.resize(blob_count);
+    cache_mode = true;
+#endif
 }
 
 void Extractor::set_light_mode(bool enable)
@@ -678,6 +744,48 @@ int Extractor::input(int blob_index, const Mat& in)
 
     return 0;
 }
+
+#if NCNN_CNNCACHE
+int Extractor::input_mrect(int blob_index, const MRect& mrect)
+{
+    if (blob_index < 0 || blob_index >= (int)blob_mats.size())
+        return -1;
+
+    matched_rects[blob_index] = mrect;
+
+    return 0;
+}
+int Extractor::clear_blob_data()
+{
+    for (Mat& mat : blob_mats)
+        mat.release();
+    return 0;
+}
+int Extractor::update_cnncache()
+{
+    struct timeval tv_begin, tv_end;
+    gettimeofday(&tv_begin, NULL);
+    for (size_t i = 0, max = net->layers.size(); i < max; i ++) {
+        Layer* layer = net->layers[i];
+        if (layer->needs_cache()) {
+            Mat& cache_blob = blob_mats_cached[i];
+            int top_blob_index = layer->tops[0];
+            Mat& top_blob = blob_mats[top_blob_index];
+            cache_blob.cloneFrom(top_blob);
+        }
+    }
+    gettimeofday(&tv_end, NULL);
+    int elapsed = ((tv_end.tv_sec - tv_begin.tv_sec) * 1000000.0f + tv_end.tv_usec - tv_begin.tv_usec) / 1000.0f;
+    LOGI("update_cnncache elapsed: %d", elapsed);
+    return 0;
+}
+int Extractor::clear_cnncache()
+{
+    for (Mat& mat : blob_mats_cached)
+        mat.release();
+    return 0;
+}
+#endif
 
 int Extractor::extract(int blob_index, Mat& feat)
 {
@@ -702,7 +810,7 @@ int Extractor::extract(int blob_index, Mat& feat)
         }
 #endif
 
-        ret = net->forward_layer(layer_index, blob_mats, lightmode);
+        ret = net->forward_layer(layer_index, this);
 
 #ifdef _OPENMP
         if (num_threads)
@@ -733,41 +841,7 @@ int Extractor::input(const char* blob_name, const Mat& in)
 int Extractor::extract(const char* blob_name, Mat& feat)
 {
     int blob_index = net->find_blob_index_by_name(blob_name);
-    if (blob_index == -1)
-        return -1;
-
-    int ret = 0;
-
-    if (blob_mats[blob_index].dims == 0)
-    {
-        int layer_index = net->blobs[blob_index].producer;
-
-#ifdef _OPENMP
-        int dynamic_current = 0;
-        int num_threads_current = 1;
-        if (num_threads)
-        {
-            dynamic_current = omp_get_dynamic();
-            num_threads_current = omp_get_num_threads();
-            omp_set_dynamic(0);
-            omp_set_num_threads(num_threads);
-        }
-#endif
-
-        ret = net->forward_layer(layer_index, blob_mats, lightmode);
-
-#ifdef _OPENMP
-        if (num_threads)
-        {
-            omp_set_dynamic(dynamic_current);
-            omp_set_num_threads(num_threads_current);
-        }
-#endif
-    }
-
-    feat = blob_mats[blob_index];
-
-    return ret;
+    return extract(blob_index, feat);
 }
 #endif // NCNN_STRING
 

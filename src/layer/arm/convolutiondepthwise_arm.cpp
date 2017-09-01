@@ -177,4 +177,12 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob) con
     return 0;
 }
 
+#if NCNN_CNNCACHE
+int ConvolutionDepthWise_arm::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const
+{
+    // LOGI("Convolution_arm::forward_cached\n");
+    return ConvolutionDepthWise::forward_cached(bottom_blob, top_blob, mrect, cached_blob);
+}
+#endif
+
 } // namespace ncnn

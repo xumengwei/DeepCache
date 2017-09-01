@@ -15,11 +15,16 @@
 #ifndef NCNN_LAYER_H
 #define NCNN_LAYER_H
 
+#if NCNN_CNNCACHE
+#include <android/log.h>
+#endif
+
 #include <stdio.h>
 #include <string>
 #include <vector>
 #include "mat.h"
 #include "platform.h"
+#include "mrect.h"
 
 namespace ncnn {
 
@@ -73,6 +78,13 @@ public:
     // return 0 if success
     virtual int forward_inplace(std::vector<Mat>& bottom_top_blobs) const;
     virtual int forward_inplace(Mat& bottom_top_blob) const;
+
+#if NCNN_CNNCACHE
+    virtual int forward_mrect(std::vector<MRect>& bottom_mrects, std::vector<MRect>& top_mrects) const;
+    virtual int forward_mrect(MRect& bottom_mrect, MRect& top_mrect) const;
+    virtual int forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const;
+    virtual bool needs_cache() const {return false;}
+#endif
 
 public:
 #if NCNN_STRING

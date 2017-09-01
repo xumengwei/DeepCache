@@ -21,6 +21,7 @@
 #include "layer.h"
 #include "mat.h"
 #include "platform.h"
+#include "mrect.h"
 
 namespace ncnn {
 
@@ -86,7 +87,7 @@ protected:
     int custom_layer_to_index(const char* type);
 #endif // NCNN_STRING
     Layer* create_custom_layer(int index);
-    int forward_layer(int layer_index, std::vector<Mat>& blob_mats, bool lightmode) const;
+    int forward_layer(int layer_index, Extractor* extract) const;
 
 protected:
     std::vector<Blob> blobs;
@@ -126,15 +127,25 @@ public:
     // return 0 if success
     int extract(int blob_index, Mat& feat);
 
-protected:
     friend Extractor Net::create_extractor() const;
     Extractor(const Net* net, int blob_count);
+    Extractor(){};
 
-private:
+public:
     const Net* net;
     std::vector<Mat> blob_mats;
     bool lightmode;
     int num_threads;
+#if NCNN_CNNCACHE
+    bool cache_mode;
+    std::vector<Mat> blob_mats_cached;
+    std::vector<MRect> matched_rects;
+    int input_mrect(int blob_index, const MRect& mrect);
+    int update_cnncache();
+    int clear_cnncache();
+    int clear_blob_data();
+    void set_cache_mode(bool mode) {cache_mode = mode;}
+#endif
 };
 
 } // namespace ncnn

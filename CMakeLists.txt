@@ -19,11 +19,13 @@ cmake_minimum_required(VERSION 2.8.10)
 # set(CMAKE_BUILD_TYPE debug)
 # set(CMAKE_BUILD_TYPE relwithdebinfo)
 set(CMAKE_BUILD_TYPE release)
+set (CMAKE_CXX_STANDARD 11)
 
 option(NCNN_OPENMP "openmp support" ON)
 option(NCNN_STDIO "load model from external file" ON)
 option(NCNN_STRING "plain and verbose string" ON)
 option(NCNN_OPENCV "minimal opencv structure emulation" OFF)
+option(NCNN_CNNCACHE "using cnncache" ON)
 
 if(NCNN_OPENMP)
     find_package(OpenMP)

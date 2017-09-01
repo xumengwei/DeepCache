@@ -131,6 +131,7 @@ install(FILES
     cpu.h
     layer.h
     mat.h
+    mrect.h
     net.h
     opencv.h
     ${CMAKE_CURRENT_BINARY_DIR}/platform.h

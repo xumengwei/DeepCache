@@ -304,4 +304,13 @@ int Pooling::forward(const Mat& bottom_blob, Mat& top_blob) const
     return 0;
 }
 
+#if NCNN_CNNCACHE
+int Pooling::forward_mrect(MRect& bottom_mrect, MRect& top_mrect) const
+{
+    // LOGI("Convolution::forward_mrect info: %s\n", bottom_mrect.info().c_str());
+    top_mrect.forward_in_conv_or_pool(bottom_mrect, pad, kernel_size, stride);
+    return 0;
+}
+#endif
+
 } // namespace ncnn
