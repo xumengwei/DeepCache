@@ -26,6 +26,11 @@ public:
 
     virtual int forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& top_blobs) const;
 
+#if NCNN_CNNCACHE
+    virtual int forward_mrect(std::vector<MRect>& bottom_mrects, std::vector<MRect>& top_mrects) const;
+    virtual bool needs_cache() const {return false;}
+#endif
+
 public:
 };
 

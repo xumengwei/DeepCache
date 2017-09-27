@@ -61,4 +61,33 @@ int Concat::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& top_
     return 0;
 }
 
+#if NCNN_CNNCACHE
+int Concat::forward_mrect(std::vector<MRect>& bottom_mrects, std::vector<MRect>& top_mrects) const
+{
+    top_mrects.resize(1);
+    MRect& mr = top_mrects[0];
+    mr.set_offset(bottom_mrects[0].x_offset, bottom_mrects[0].y_offset);
+    for (size_t i = 0, max = bottom_mrects[0].size(); i < max; i ++) {
+        int x1 = bottom_mrects[0].changed_vecs[i].x1;
+        int y1 = bottom_mrects[0].changed_vecs[i].y1;
+        int x2 = bottom_mrects[0].changed_vecs[i].x2;
+        int y2 = bottom_mrects[0].changed_vecs[i].y2;
+        for (size_t j = 1, maxx = bottom_mrects.size(); j < maxx; j ++) {
+            const struct rect temp = bottom_mrects[j].changed_vecs[i];
+            if (temp.x1 <= x1 && temp.y1 <= y1) {
+                x1 = temp.x1;
+                y1 = temp.y1;
+            }
+            if (temp.x2 >= x2 && temp.y2 >= y2) {
+                x2 = temp.x2;
+                y2 = temp.y2;
+            }
+        }
+        mr.add_rect(x1, y1, x2, y2);
+        // LOGI("YYYYY %d %d %d %d\n", x1, y1, x2, y2);
+    }
+    return 0;
+}
+#endif
+
 } // namespace ncnn

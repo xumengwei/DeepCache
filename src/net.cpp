@@ -127,7 +127,7 @@ int Net::load_param(FILE* fp)
         layer->type = std::string(layer_type);
         layer->name = std::string(layer_name);
         // fprintf(stderr, "new layer %d %s\n", layer_index, layer_name);
-        // LOGI("new layer %d %s\n", layer_index, layer_name);
+        // LOGI("new layer %d %s %d\n", layer_index, layer_name, typeindex);
 
         layer->bottoms.resize(bottom_count);
         for (int i=0; i<bottom_count; i++)
@@ -482,6 +482,7 @@ int Net::find_blob_index_by_name(const char* name) const
     for (size_t i=0; i<blobs.size(); i++)
     {
         const Blob& blob = blobs[i];
+        // LOGI("name %s %s\n", blob.name.c_str(), name);
         if (blob.name == name)
         {
             return i;
@@ -543,10 +544,10 @@ int Net::forward_layer(int layer_index, Extractor* extractor) const
     const Layer* layer = layers[layer_index];
     int ret;
 
-#if NCNN_CNNCACHE
-    // LOGI("Net::forward_layer index: %d name: %s type: %s\n",
-    //     layer_index, layer->name.c_str(), layer->type.c_str());
-#endif
+// #if NCNN_CNNCACHE
+//     LOGI("Net::forward_layer index: %d name: %s type: %s\n",
+//         layer_index, layer->name.c_str(), layer->type.c_str());
+// #endif
     // fprintf(stderr, "forward_layer %d %s\n", layer_index, layer->name.c_str());
 
     if (layer->one_blob_only)

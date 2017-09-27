@@ -387,7 +387,7 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
     // convolv with NxN kernel
     // value = value + bias
 
-    if (cached_blob.empty()) {
+    if (cached_blob.empty() || mrect.changed_vecs.size() == 0) {
         // LOGI("cached_blob size: %dx%dx%d %d %p\n",
         //     cached_blob.w, cached_blob.h, cached_blob.c, cached_blob.cstep, cached_blob.data);
         return Convolution::forward(bottom_blob, top_blob);
@@ -466,24 +466,69 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
     // Step 1 & Step 2
     // TODO: make it run on multiple threads
     int* cached_map = (int*) calloc(outh * outw, sizeof(int));
-    for (size_t i = 0, max = mrect.size(); i < max; i ++) {
-        struct rect pre = mrect.pre[i];
-        struct rect cur = mrect.cur[i];
-        // #pragma omp parallel for
-        for (int j = 0; j < num_output; j ++) {
-            float* pre_ptr = cached_blob.channel(j).row(pre.y1) + pre.x1;
-            float* cur_ptr = top_blob.channel(j).row(cur.y1) + cur.x1;
-            int offset = (pre.x2 - pre.x1 + 1) * sizeof(float);
-            for (int k = cur.y1; k <= cur.y2; k ++) {
-                // Step 2: build cache map
-                cached_map[k * outw + cur.x1] = pre.x2 - pre.x1 + 1;
-                // Step 1: copy cached block
-                memcpy(cur_ptr, pre_ptr, offset);
-                pre_ptr += top_blob.w;
-                cur_ptr += top_blob.w;
+
+    std::vector<int> xx;
+    std::vector<int> yy;
+    for (int h = 0; h < outh; h ++) {
+        xx.resize(0);
+        yy.resize(0);
+        for (size_t i = 0, max = mrect.size(); i < max; i ++) {
+            struct rect r = mrect.changed_vecs[i];
+            if (r.y1 <= h && r.y2 >= h) {
+                xx.push_back(r.x1);
+                yy.push_back(r.x2);
             }
         }
+        // bubble sort
+        for (int p = 0, max = xx.size(); p < max - 1; p ++)
+            for (int q = max - 1; q > p; q --) {
+                if (xx[q] < xx[q - 1]) {
+                    int temp = xx[q];
+                    xx[q] = xx[q - 1];
+                    xx[q - 1] = temp;
+
+                    temp = yy[q];
+                    yy[q] = yy[q - 1];
+                    yy[q - 1] = temp;
+                }
+            }
+        xx.push_back(outw);
+        yy.push_back(outw);
+        int start = 0;
+        for (size_t i = 0, max = xx.size(); i < max; i ++) {
+            if (xx[i] > start) {
+                // LOGI("Reuse h: %d, [%d, %d]\n", h, start, xx[i]);
+                // reuse [start, xx[i])
+                cached_map[h * outw + start] = xx[i] - start;
+                start = yy[i] + 1;
+            }
+            if (xx[i] <= start) {
+                start = std::max(start, yy[i]);
+            }
+        }
+
     }
+
+
+
+    // for (size_t i = 0, max = mrect.size(); i < max; i ++) {
+    //     struct rect pre = mrect.pre[i];
+    //     struct rect cur = mrect.cur[i];
+    //     // #pragma omp parallel for
+    //     for (int j = 0; j < num_output; j ++) {
+    //         float* pre_ptr = cached_blob.channel(j).row(pre.y1) + pre.x1;
+    //         float* cur_ptr = top_blob.channel(j).row(cur.y1) + cur.x1;
+    //         int offset = (pre.x2 - pre.x1 + 1) * sizeof(float);
+    //         for (int k = cur.y1; k <= cur.y2; k ++) {
+    //             // Step 2: build cache map
+    //             cached_map[k * outw + cur.x1] = pre.x2 - pre.x1 + 1;
+    //             // Step 1: copy cached block
+    //             memcpy(cur_ptr, pre_ptr, offset);
+    //             pre_ptr += top_blob.w;
+    //             cur_ptr += top_blob.w;
+    //         }
+    //     }
+    // }
 
     // num_output
     const float* weight_data_ptr = weight_data;
@@ -499,7 +544,10 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
                 // Reuse the block
                 int temp = cached_map[i * outw + j];
                 if (temp > 0) {
-                    j += temp;
+                    float* pre_ptr = cached_blob.channel(p).row(i + mrect.y_offset) + (j + mrect.x_offset);
+                    memcpy(&outptr[j], pre_ptr, temp * sizeof(float));
+                    j += (temp - 1);
+                    continue;
                 }
 
                 float sum = 0.f;
@@ -531,6 +579,8 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
             outptr += outw;
         }
     }
+
+    free(cached_map);
 
     gettimeofday(&t2, NULL);
 

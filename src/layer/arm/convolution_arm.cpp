@@ -155,6 +155,6 @@ int Convolution_arm::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect
     // LOGI("Convolution_arm::forward_cached\n");
     return Convolution::forward_cached(bottom_blob, top_blob, mrect, cached_blob);
 }
-#endif
+#endif // NCNN_CNNCACHE
 
 } // namespace ncnn

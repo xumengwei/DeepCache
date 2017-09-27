@@ -34,85 +34,83 @@ class MRect
 
 public:
 
-    MRect(){}
+    MRect() {}
 
-    void add_rect(int arg0, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7) {
-        pre.push_back(rect(arg0, arg1, arg2, arg3));
+    void set_offset(int x, int y) {
+        x_offset = x;
+        y_offset = y;
+    }
 
-        cur.push_back(rect(arg4, arg5, arg6, arg7));  
+    void add_rect(int arg0, int arg1, int arg2, int arg3) {
+        changed_vecs.push_back(rect(arg0, arg1, arg2, arg3));
     }
 
     void copyFrom(MRect other) {
-        pre.resize(0);
-        cur.resize(0);
-    	for (struct rect r: other.pre) {
-            this->pre.push_back(r);
-        }
-        for (struct rect r: other.cur) {
-            this->cur.push_back(r);
+        x_offset = other.x_offset;
+        y_offset = other.y_offset;
+        changed_vecs.resize(0);
+    	for (struct rect r: other.changed_vecs) {
+            this->changed_vecs.push_back(r);
         }
     }
 
     std::string info() {
-        std::string ret;
+        std::string ret("");
         char a[64];
-        for (unsigned i = 0; i < pre.size(); i ++) {
+        for (unsigned i = 0; i < changed_vecs.size(); i ++) {
             if (i > 0)
                 ret += ", ";
-            struct rect r1 = pre[i];
-            struct rect r2 = cur[i];
-            sprintf(a, "(%d,%d,%d,%d) -> (%d,%d,%d,%d)",
-                r1.x1, r1.y1, r1.x2, r1.y2, r2.x1, r2.y1, r2.x2, r2.y2);
+            struct rect r1 = changed_vecs[i];
+            sprintf(a, "(%d,%d,%d,%d)", r1.x1, r1.y1, r1.x2, r1.y2);
             ret += a;
         }
         return ret;
     }
 
     int size() {
-        return pre.size();
+        return changed_vecs.size();
     }
 
     void forward_rect_conv_or_pool(
         struct rect& r1, struct rect& r2, int pad, int ksize, int stride) {
         
         // TODO: not correct yet
-        int off = stride > 1 ? 1 : 0;
+        // int off = stride > 1 ? 1 : 0;
         if (pad >= 0) { // SAME
-            r1.x1 = (r2.x1 + pad + ksize / 2) / stride;
-            r1.y1 = (r2.y1 + pad + ksize / 2) / stride;
-            r1.x2 = (r2.x2 + pad - ksize / 2) / stride;
-            r1.y2 = (r2.y2 + pad - ksize / 2) / stride;
+            r1.x1 = std::max(0, (r2.x1 - ksize / 2) / stride);
+            r1.y1 = std::max(0, (r2.y1 - ksize / 2) / stride);
+            r1.x2 = (r2.x2 + ksize / 2) / stride;
+            r1.y2 = (r2.y2 + ksize / 2) / stride;
         }
         else if (pad == -233) { // VALID
-            r1.x1 = (r2.x1 + ksize / 2) / stride;
-            r1.y1 = (r2.y1 + ksize / 2) / stride;
-            r1.x2 = (r2.x2 - ksize / 2) / stride;
-            r1.y2 = (r2.y2 - ksize / 2) / stride;
+            r1.x1 = (r2.x1 - ksize / 2) / stride;
+            r1.y1 = (r2.y1 - ksize / 2) / stride;
+            r1.x2 = (r2.x2 + ksize / 2) / stride;
+            r1.y2 = (r2.y2 + ksize / 2) / stride;
         }
-
+        // LOGI("Yes (%d,%d,%d,%d) -> (%d,%d,%d,%d)\n",
+        //     r2.x1, r2.y1, r2.x2, r2.y2, r1.x1, r1.y1, r1.x2, r1.y2);
     }
 
     int forward_in_conv_or_pool(MRect& bottom_mrect, int pad, int ksize, int stride) {
+        // offset
+        x_offset = bottom_mrect.x_offset / stride;
+        y_offset = bottom_mrect.y_offset / stride;
+
+        // vec
         const int threshold = 1;
         size_t size = bottom_mrect.size();
-        pre.resize(0);
-        cur.resize(0);
+        changed_vecs.resize(size);
         for (size_t i = 0; i < size; i ++) {
-            rect pre_r, cur_r;
             forward_rect_conv_or_pool(
-                pre_r, bottom_mrect.pre[i], pad, ksize, stride);
-            forward_rect_conv_or_pool(
-                cur_r, bottom_mrect.cur[i], pad, ksize, stride);
-            if ((pre_r.x2 - pre_r.x1 >= threshold) && (pre_r.y2 - pre_r.y1 >= threshold)) {
-                pre.push_back(pre_r);
-                cur.push_back(cur_r);
-            }
+                changed_vecs[i], bottom_mrect.changed_vecs[i], pad, ksize, stride);
         }
         return 0;
     }
 
-    std::vector<struct rect> pre;
-    std::vector<struct rect> cur;
+    int x_offset;
+    int y_offset;
+    std::vector<struct rect> changed_vecs;
 };
 
 } // namespace ncnn
