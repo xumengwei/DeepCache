@@ -15,6 +15,32 @@ namespace ncnn {
 #define  LOGD(...)  __android_log_print(ANDROID_LOG_DEBUG,LOG_TAG,__VA_ARGS__)
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
 
+struct timeval tv_begin, tv_end;
+inline void log_time_begin() {
+    gettimeofday(&tv_begin, NULL);
+}
+inline void log_time_end(char* str) {
+    static int LOG_TIME_CNT = 0;
+    if (strcmp("__reset", str) == 0) { // This is ugly, better to use extern
+        LOG_TIME_CNT = 0;
+        return;
+    }
+    gettimeofday(&tv_end, NULL);
+    int elapsed = ((tv_end.tv_sec - tv_begin.tv_sec) * 1000000.0f + tv_end.tv_usec - tv_begin.tv_usec) / 1000.0f;
+    LOGI("[%d-%s]\telapsed: %dms", LOG_TIME_CNT, str, elapsed);
+    LOG_TIME_CNT ++;
+}
+
+inline bool skip_reuse(bool* cached_map, int outw, int outh) {
+    int changed_pixel = 0;
+    for (int i = 0; i < outw * outh; i ++) {
+        changed_pixel += cached_map[i] ? 1 : 0;
+    }
+    float ratio = 1.0 * changed_pixel / outw / outh;
+    if (ratio > 0.8) return true;
+    else return false;
+}
+
 struct rect{
     int x1;
     int y1;
@@ -83,8 +109,8 @@ public:
             r1.y2 = (r2.y2 + ksize / 2) / stride;
         }
         else if (pad == -233) { // VALID
-            r1.x1 = (r2.x1 - ksize / 2) / stride;
-            r1.y1 = (r2.y1 - ksize / 2) / stride;
+            r1.x1 = std::max(0, (r2.x1 - ksize / 2) / stride);
+            r1.y1 = std::max(0, (r2.y1 - ksize / 2) / stride);
             r1.x2 = (r2.x2 + ksize / 2) / stride;
             r1.y2 = (r2.y2 + ksize / 2) / stride;
         }
@@ -97,8 +123,6 @@ public:
         x_offset = bottom_mrect.x_offset / stride;
         y_offset = bottom_mrect.y_offset / stride;
 
-        // vec
-        const int threshold = 1;
         size_t size = bottom_mrect.size();
         changed_vecs.resize(size);
         for (size_t i = 0; i < size; i ++) {

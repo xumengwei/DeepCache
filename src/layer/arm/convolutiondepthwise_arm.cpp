@@ -34,6 +34,8 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob) con
     // convolv with NxN kernel
     // value = value + bias
 
+    log_time_begin();
+
     if (kernel_size > 7 || stride > 4 || dilation != 1)
     {
         return ConvolutionDepthWise::forward(bottom_blob, top_blob);
@@ -126,6 +128,9 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob) con
     int outw = (w - kernel_size) / stride + 1;
     int outh = (h - kernel_size) / stride + 1;
 
+    LOGI("ConvolutionDepthWise_arm::forward_cached input=%dx%dx%d pad=%d ksize=%d output=%d stride=%d\n",
+        bottom_blob.w, bottom_blob.h, channels, pad, kernel_size, num_output, stride);
+
     top_blob.create(outw, outh, num_output);
     if (top_blob.empty())
         return -100;
@@ -174,14 +179,220 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob) con
         conv(bottom_blob_bordered_g, top_blob_g, weight_data_g, bias_data_g);
     }
 
+    log_time_end("convdepthwise_arm");
+
     return 0;
 }
 
 #if NCNN_CNNCACHE
 int ConvolutionDepthWise_arm::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mrect, Mat& cached_blob) const
 {
-    // LOGI("Convolution_arm::forward_cached\n");
-    return ConvolutionDepthWise::forward_cached(bottom_blob, top_blob, mrect, cached_blob);
+    if (kernel_size > 7 || stride > 4 || dilation != 1)
+    {
+        return ConvolutionDepthWise::forward_cached(bottom_blob, top_blob, mrect, cached_blob);
+    }
+
+    log_time_begin();
+
+    typedef void (*conv_func)(const Mat&, Mat&, const Mat&, const Mat&, bool*);
+
+    // kernel_size x stride
+    conv_func conv_func_table[7][4] =
+    {
+        {
+            conv1x1s1_neon_cached,
+            conv1x1s2_neon_cached,
+            0,
+            0
+        }, // kernel_size = 1
+        {
+            conv2x2s1_neon_cached,
+            0,
+            0,
+            0
+        }, // kernel_size = 2
+        {
+            conv3x3s1_neon_cached,
+            conv3x3s2_neon_cached,
+            0,
+            0
+        }, // kernel_size = 3
+        {
+            0,
+            0,
+            0,
+            conv4x4s4_neon_cached
+        }, // kernel_size = 4
+        {
+            conv5x5s1_neon_cached,
+            conv5x5s2_neon_cached,
+            0,
+            0
+        }, // kernel_size = 5
+        {
+            0,
+            0,
+            0,
+            0
+        }, // kernel_size = 6
+        {
+            conv7x7s1_neon_cached,
+            conv7x7s2_neon_cached,
+            0,
+            0
+        }  // kernel_size = 7
+    };
+
+    conv_func conv = conv_func_table[kernel_size-1][stride-1];
+    if (!conv)
+    {
+        return ConvolutionDepthWise::forward(bottom_blob, top_blob);
+    }
+
+    int w = bottom_blob.w;
+    int h = bottom_blob.h;
+    int channels = bottom_blob.c;
+
+    Mat bottom_blob_bordered = bottom_blob;
+    if (pad > 0)
+    {
+        copy_make_border(bottom_blob, bottom_blob_bordered, pad, pad, pad, pad, BORDER_CONSTANT, 0.f);
+        if (bottom_blob_bordered.empty())
+            return -100;
+
+        w = bottom_blob_bordered.w;
+        h = bottom_blob_bordered.h;
+    }
+    else if (pad == -233)
+    {
+        int wpad = kernel_size + (w - 1) / stride * stride - w;
+        int hpad = kernel_size + (h - 1) / stride * stride - h;
+        if (wpad > 0 || hpad > 0)
+        {
+            copy_make_border(bottom_blob, bottom_blob_bordered, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, BORDER_CONSTANT, 0.f);
+            if (bottom_blob_bordered.empty())
+                return -100;
+        }
+
+        w = bottom_blob_bordered.w;
+        h = bottom_blob_bordered.h;
+    }
+
+    int outw = (w - kernel_size) / stride + 1;
+    int outh = (h - kernel_size) / stride + 1;
+
+    // If the output feature map is already too squeezed, don't reuse
+    if (outw <= 5 || outh <= 5) {
+        return ConvolutionDepthWise_arm::forward(bottom_blob, top_blob);
+    }
+
+    std::vector<struct rect>::iterator itr = mrect.changed_vecs.begin();
+    while (itr != mrect.changed_vecs.end()) {
+        if (itr->x1 <= 0 && itr->y1 <= 0 && itr->x2 >= (outw - 1) && itr->y2 >= (outh - 1)) // No room for reusing now!
+            return ConvolutionDepthWise_arm::forward(bottom_blob, top_blob);
+        ++ itr;
+    }
+
+    LOGI("ConvolutionDepthWise_arm::forward_cached input=%dx%dx%d pad=%d ksize=%d output=%d stride=%d\n",
+        bottom_blob.w, bottom_blob.h, channels, pad, kernel_size, num_output, stride);
+
+    top_blob.create(outw, outh, num_output);
+    if (top_blob.empty())
+        return -100;
+
+    // Construct cached map
+    bool* cached_map = (bool*) calloc(outh * outw, sizeof(bool));
+    int mrect_size = mrect.size();
+    #pragma omp parallel for
+    for (int i = 0; i < mrect_size; i ++) {
+        struct rect r = mrect.changed_vecs[i];
+        for (int h = r.y1; h <= std::min(r.y2, outh - 1); h ++)
+            for (int w = r.x1; w <= std::min(r.x2, outw - 1); w ++)
+                cached_map[h * outw + w] = true;
+    }
+
+    if (skip_reuse(cached_map, outh, outw)) {
+        free(cached_map);
+        return ConvolutionDepthWise_arm::forward(bottom_blob, top_blob);
+    }
+
+    // Reuse cache
+    // TODO: move it to neon to save time
+    const int cpy_size = (outw - abs(mrect.x_offset)) * sizeof(float);
+    const int sh = (mrect.y_offset >= 0 ? 0 : -mrect.y_offset);
+    const int eh = (mrect.y_offset >= 0 ? (outh - mrect.y_offset) : outh);
+    const int sw = (mrect.x_offset >= 0 ? 0 : -mrect.x_offset);
+    #pragma omp parallel for
+    for (int i = 0; i < num_output; i ++) {
+        for (int h = sh; h < eh; h ++) {
+            float* dst = top_blob.channel(i).row(h) + sw;
+            float* src = cached_blob.channel(i).row(h + mrect.y_offset) + sw + mrect.x_offset;
+            memcpy(dst, src, cpy_size);
+        }
+
+        const float* bias = bias_data;
+        const float bias0 = bias_data ? bias_data[i] : 0.f;
+        bool* flag = cached_map;
+        float* data = (float*)top_blob.channel(i);
+        int cnt = outw * outh;
+        while (cnt --) {
+            if (*flag) {
+                *data = bias0;
+            }
+            flag ++;
+            data ++;
+        }
+    }
+
+    const int maxk = kernel_size * kernel_size;
+
+    // depth-wise
+    if (channels == group && group == num_output)
+    {
+#ifdef _OPENMP
+        int nested_current = omp_get_nested();
+        omp_set_nested(0);
+#endif
+
+        #pragma omp parallel for
+        for (int g=0; g<group; g++)
+        {
+            Mat bottom_blob_bordered_g = bottom_blob_bordered.channel(g);
+            Mat top_blob_g = top_blob.channel(g);
+            Mat weight_data_g(maxk, (float*)(weight_data + maxk * g));
+            Mat bias_data_g;
+            if (bias_term)
+                bias_data_g = Mat(1, (float*)(bias_data + g));
+
+            conv(bottom_blob_bordered_g, top_blob_g, weight_data_g, bias_data_g, cached_map);
+        }
+
+#ifdef _OPENMP
+        omp_set_nested(nested_current);
+#endif
+        return 0;
+    }
+
+    const int channels_g = channels / group;
+    const int num_output_g = num_output / group;
+
+    for (int g=0; g<group; g++)
+    {
+        Mat bottom_blob_bordered_g(w, h, channels_g, bottom_blob_bordered.channel(channels_g * g));
+        Mat top_blob_g(outw, outh, num_output_g, top_blob.channel(num_output_g * g));
+        Mat weight_data_g(maxk * channels_g * num_output_g, (float*)(weight_data + maxk * channels_g * num_output_g * g));
+        Mat bias_data_g;
+        if (bias_term)
+            bias_data_g = Mat(num_output_g, (float*)(bias_data + num_output_g * g));
+
+        conv(bottom_blob_bordered_g, top_blob_g, weight_data_g, bias_data_g, cached_map);
+    }
+
+    log_time_end("convdepthwise_arm_cached");
+
+    free(cached_map);
+
+    return 0;
 }
 #endif
 

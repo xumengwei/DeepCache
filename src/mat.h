@@ -342,7 +342,8 @@ inline Mat Mat::clone() const
 inline int Mat::cloneFrom(const Mat target)
 {
     size_t totalsize = target.total() * sizeof(float);
-    data = (float*)fastMalloc(totalsize + (int)sizeof(*refcount));
+    if (data == NULL || target.total() > total())
+        data = (float*)fastMalloc(totalsize + (int)sizeof(*refcount));
     
     dims = target.dims;
     w = target.w;

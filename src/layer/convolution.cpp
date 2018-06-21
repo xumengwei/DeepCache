@@ -253,8 +253,7 @@ int Convolution::load_model(const unsigned char*& mem)
 
 int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
 {
-    struct timeval t1, t2;
-    gettimeofday(&t1, NULL);
+    log_time_begin();
 
     // convolv with NxN kernel
     // value = value + bias
@@ -295,10 +294,8 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
     int outw = (w - kernel_extent) / stride + 1;
     int outh = (h - kernel_extent) / stride + 1;
 
-#if NCNN_CNNCACHE    
-    LOGI("Convolution::forward input=%dx%dx%d output=%dx%dx%d pad=%d ksize=%d stride=%d dilation=%d\n",
-        w, h, channels, outw, outh, num_output, pad, kernel_size, stride, dilation);
-#endif
+    LOGI("Convolution::forward input=%dx%dx%d pad=%d ksize=%d output=%d stride=%d\n",
+        w, h, channels, pad, kernel_size, num_output, stride);
 
     top_blob.create(outw, outh, num_output);
     if (top_blob.empty())
@@ -366,10 +363,7 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob) const
         }
     }
 
-    gettimeofday(&t2, NULL);
-
-    float elapsed_1 = ((t2.tv_sec - t1.tv_sec) * 1000000.0f + t2.tv_usec - t1.tv_usec) / 1000.0f;
-    LOGI("Convolution::forward elapsed: %f\n", elapsed_1);
+    log_time_end("conv");
 
     return 0;
 }
@@ -387,14 +381,11 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
     // convolv with NxN kernel
     // value = value + bias
 
-    if (cached_blob.empty() || mrect.changed_vecs.size() == 0) {
-        // LOGI("cached_blob size: %dx%dx%d %d %p\n",
-        //     cached_blob.w, cached_blob.h, cached_blob.c, cached_blob.cstep, cached_blob.data);
+    if (cached_blob.empty()) {
         return Convolution::forward(bottom_blob, top_blob);
     }
 
-    struct timeval t1, t2;
-    gettimeofday(&t1, NULL);
+    log_time_begin();
 
     // Step 1: copy the cahced blocks
     // Step 2: make a bitmap specifying which can be reused
@@ -404,9 +395,9 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
 
-    LOGI("Convolution::forward_cached input %dx%dx%d  pad =%d  ksize=%d output:%d stride=%d\n",
-        w, h, channels, pad, kernel_size, num_output, stride);
-    LOGI("mrect info: %s\n", mrect.info().c_str());
+    // LOGI("Convolution::forward_cached input=%dx%dx%d pad=%d ksize=%d output=%d stride=%d\n",
+    //     w, h, channels, pad, kernel_size, num_output, stride);
+    // LOGI("mrect info: %s\n", mrect.info().c_str());
 
     const int kernel_extent = dilation * (kernel_size - 1) + 1;
 
@@ -438,9 +429,19 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
     int outw = (w - kernel_extent) / stride + 1;
     int outh = (h - kernel_extent) / stride + 1;
 
+    if (outw <= 5 || outh <= 5) {
+        return Convolution::forward(bottom_blob, top_blob);
+    }
+
     top_blob.create(outw, outh, num_output);
     if (top_blob.empty())
         return -100;
+
+    if (mrect.size() == 0) {
+        memcpy(top_blob.data, cached_blob.data, cached_blob.total() * sizeof(float));
+        log_time_end("conv_cached");
+        return 0;
+    }
 
     const int maxk = kernel_size * kernel_size;
 
@@ -582,10 +583,7 @@ int Convolution::forward_cached(const Mat& bottom_blob, Mat& top_blob, MRect& mr
 
     free(cached_map);
 
-    gettimeofday(&t2, NULL);
-
-    float elapsed_1 = ((t2.tv_sec - t1.tv_sec) * 1000000.0f + t2.tv_usec - t1.tv_usec) / 1000.0f;
-    LOGI("Convolution::forward_cached elapsed: %f\n", elapsed_1);
+    log_time_end("conv_cached");
 
     return 0;
 }

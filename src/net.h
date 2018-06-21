@@ -140,7 +140,8 @@ public:
     bool cache_mode;
     std::vector<Mat> blob_mats_cached;
     std::vector<MRect> matched_rects;
-    int input_mrect(int blob_index, const MRect& mrect);
+    int input_mrect(int blob_index, MRect& mrect);
+    int input_mrect(const char* blob_name, MRect& mrect);
     int update_cnncache();
     int clear_cnncache();
     int clear_blob_data();

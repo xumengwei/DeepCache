@@ -321,6 +321,8 @@ int Net::load_model(FILE* fp)
     {
         Layer* layer = layers[i];
 
+        // LOGI("Load bin layer: %d", i);
+
         int lret = layer->load_model(fp);
         if (lret != 0)
         {
@@ -390,7 +392,7 @@ int Net::load_param(const unsigned char* _mem)
 //         layer->type = std::string(layer_type);
 //         layer->name = std::string(layer_name);
 #if NCNN_CNNCACHE
-        LOGI("new layer %d\n", typeindex);
+        // LOGI("new layer %d\n", typeindex);
 #endif
 
         layer->bottoms.resize(bottom_count);
@@ -646,7 +648,7 @@ int Net::forward_layer(int layer_index, Extractor* extractor) const
             bottom_blobs[i] = blob_mats[bottom_blob_index];
 
 #if NCNN_CNNCACHE
-            bottom_mrects[i] = extractor->matched_rects[bottom_blob_index];
+            bottom_mrects[i].copyFrom(extractor->matched_rects[bottom_blob_index]);
 #endif
             if (lightmode)
             {
@@ -747,8 +749,18 @@ int Extractor::input(int blob_index, const Mat& in)
 }
 
 #if NCNN_CNNCACHE
-int Extractor::input_mrect(int blob_index, const MRect& mrect)
+int Extractor::input_mrect(int blob_index, MRect& mrect)
 {
+    if (blob_index < 0 || blob_index >= (int)blob_mats.size())
+        return -1;
+
+    matched_rects[blob_index] = mrect;
+
+    return 0;
+}
+int Extractor::input_mrect(const char* blob_name, MRect& mrect)
+{
+    int blob_index = net->find_blob_index_by_name(blob_name);
     if (blob_index < 0 || blob_index >= (int)blob_mats.size())
         return -1;
 
@@ -758,26 +770,34 @@ int Extractor::input_mrect(int blob_index, const MRect& mrect)
 }
 int Extractor::clear_blob_data()
 {
-    for (Mat& mat : blob_mats)
+    // int total_size = 0;
+    for (Mat& mat : blob_mats) {
+        // total_size += mat.total();
         mat.release();
+    }
+    // LOGI("TOTAL_SIZE: %d", total_size);
     return 0;
 }
 int Extractor::update_cnncache()
 {
-    struct timeval tv_begin, tv_end;
-    gettimeofday(&tv_begin, NULL);
+    // int cached_size = 0;
+    // struct timeval tv_begin, tv_end;
+    // gettimeofday(&tv_begin, NULL);
     for (size_t i = 0, max = net->layers.size(); i < max; i ++) {
         Layer* layer = net->layers[i];
         if (layer->needs_cache()) {
             Mat& cache_blob = blob_mats_cached[i];
             int top_blob_index = layer->tops[0];
             Mat& top_blob = blob_mats[top_blob_index];
+            // LOGI("PPP %p %p", top_blob.data, cache_blob.data);
             cache_blob.cloneFrom(top_blob);
+            // cached_size += top_blob.total();
         }
     }
-    gettimeofday(&tv_end, NULL);
-    int elapsed = ((tv_end.tv_sec - tv_begin.tv_sec) * 1000000.0f + tv_end.tv_usec - tv_begin.tv_usec) / 1000.0f;
-    LOGI("update_cnncache elapsed: %d", elapsed);
+    // LOGI("CACHE_SIZE: %d", cached_size);
+    // gettimeofday(&tv_end, NULL);
+    // int elapsed = ((tv_end.tv_sec - tv_begin.tv_sec) * 1000000.0f + tv_end.tv_usec - tv_begin.tv_usec) / 1000.0f;
+    // LOGI("update_cnncache elapsed: %d", elapsed);
     return 0;
 }
 int Extractor::clear_cnncache()
@@ -790,6 +810,7 @@ int Extractor::clear_cnncache()
 
 int Extractor::extract(int blob_index, Mat& feat)
 {
+    log_time_end("__reset");
     if (blob_index < 0 || blob_index >= (int)blob_mats.size())
         return -1;
 

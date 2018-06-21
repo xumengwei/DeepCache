@@ -87,15 +87,8 @@ int Layer::forward_inplace(Mat& bottom_top_blob) const
 #if NCNN_CNNCACHE
 int Layer::forward_mrect(std::vector<MRect>& bottom_mrects, std::vector<MRect>& top_mrects) const
 {
-    MRect bottom_mrect;
-    for (MRect m: bottom_mrects) {
-        if (m.size() > 0) {
-            bottom_mrect = m;
-            break;
-        }
-    }
     for (MRect& mrect: top_mrects) {
-        mrect.copyFrom(bottom_mrect);
+        mrect.copyFrom(bottom_mrects[0]);
     }
     return 0;
 }

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent">
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content">
+
+    <Button
+        android:id="@+id/buttonImage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="select" />
+    <Button
+        android:id="@+id/buttonDetect"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="detect" />
+    <Button
+        android:id="@+id/buttonClearCache"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="clear cache"/>
+    <Button
+        android:id="@+id/buttonTest"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="test"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content">
+    <Button
+        android:id="@+id/DSTest"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="DS"/>
+
+    <Button
+        android:id="@+id/runBenchmark"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="RUN"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/infoResult"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:text="" />
+
+    <ImageView
+        android:id="@+id/imageView"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:layout_weight="1" />
+
+</LinearLayout>
